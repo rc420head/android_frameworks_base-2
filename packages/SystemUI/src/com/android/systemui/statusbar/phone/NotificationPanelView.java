@@ -224,9 +224,6 @@ public class NotificationPanelView extends PanelView implements
     };
     private NotificationGroupManager mGroupManager;
 
-    private Handler mHandler = new Handler();
-    private SettingsObserver mSettingsObserver;
-
     private boolean mDoubleTapToSleepEnabled;
     private boolean mDoubleTapToSleepAnywhere;
     private int mStatusBarHeaderHeight;
@@ -394,16 +391,6 @@ public class NotificationPanelView extends PanelView implements
             mQsContainer.setHeightOverride(mQsContainer.getDesiredHeight());
         }
         updateMaxHeadsUpTranslation();
-    }
-
-    @Override
-    public void onAttachedToWindow() {
-        mSettingsObserver.observe();
-    }
-
-    @Override
-    public void onDetachedFromWindow() {
-        mSettingsObserver.unobserve();
     }
 
     private void startQsSizeChangeAnimation(int oldHeight, final int newHeight) {
@@ -2494,9 +2481,11 @@ public class NotificationPanelView extends PanelView implements
         mQsSecureExpandDisabled = Settings.Secure.getIntForUser(
                 mContext.getContentResolver(), Settings.Secure.LOCK_QS_DISABLED, 0,
                 UserHandle.USER_CURRENT) != 0;
-            mDoubleTapToSleepEnabled = Settings.System.getIntForUser(resolver,
-                    Settings.System.DOUBLE_TAP_SLEEP_GESTURE, 1, UserHandle.USER_CURRENT) == 1;
-            mDoubleTapToSleepAnywhere = Settings.System.getIntForUser(resolver,
-                    Settings.System.DOUBLE_TAP_SLEEP_ANYWHERE, 0, UserHandle.USER_CURRENT) == 1;
+        mDoubleTapToSleepEnabled = Settings.System.getIntForUser(
+                mContext.getContentResolver(), Settings.System.DOUBLE_TAP_SLEEP_GESTURE, 0,
+                UserHandle.USER_CURRENT) != 0;
+        mDoubleTapToSleepAnywhere = Settings.System.getIntForUser(
+                mContext.getContentResolver(), Settings.System.DOUBLE_TAP_SLEEP_ANYWHERE, 0,
+                UserHandle.USER_CURRENT) != 0;
         }
     }
