@@ -147,6 +147,7 @@ import com.android.internal.statusbar.IStatusBarService;
 import com.android.internal.statusbar.NotificationVisibility;
 import com.android.internal.statusbar.StatusBarIcon;
 import com.android.internal.util.NotificationMessagingUtil;
+import com.android.internal.utils.du.DUActionUtils;
 import com.android.internal.widget.LockPatternUtils;
 import com.android.keyguard.KeyguardHostView.OnDismissAction;
 import com.android.keyguard.KeyguardStatusView;
@@ -175,6 +176,7 @@ import com.android.systemui.doze.DozeLog;
 import com.android.systemui.fragments.FragmentHostManager;
 import com.android.systemui.fragments.PluginFragmentListener;
 import com.android.systemui.keyguard.KeyguardViewMediator;
+import com.android.systemui.navigation.Navigator;
 import com.android.systemui.plugins.ActivityStarter;
 import com.android.systemui.plugins.qs.QS;
 import com.android.systemui.plugins.statusbar.NotificationMenuRowPlugin.MenuItem;
@@ -224,6 +226,7 @@ import com.android.systemui.statusbar.policy.ConfigurationController;
 import com.android.systemui.statusbar.policy.ConfigurationController.ConfigurationListener;
 import com.android.systemui.statusbar.policy.DarkIconDispatcher;
 import com.android.systemui.statusbar.policy.DeviceProvisionedController;
+import com.android.systemui.statusbar.policy.FlashlightController;
 import com.android.systemui.statusbar.policy.DeviceProvisionedController.DeviceProvisionedListener;
 import com.android.systemui.statusbar.policy.HeadsUpManager;
 import com.android.systemui.statusbar.policy.KeyguardMonitor;
@@ -789,6 +792,7 @@ public class StatusBar extends SystemUI implements DemoMode,
 
     private NavigationBarFragment mNavigationBar;
     private View mNavigationBarView;
+    private FlashlightController mFlashlightController;
 
     @Override
     public void start() {
@@ -848,6 +852,9 @@ public class StatusBar extends SystemUI implements DemoMode,
                 true,
                 mLockscreenSettingsObserver,
                 UserHandle.USER_ALL);
+
+        mContext.getContentResolver().registerContentObserver(Settings.Secure.getUriFor(
+                Settings.Secure.NAVIGATION_BAR_VISIBLE), false, mNavbarObserver, UserHandle.USER_ALL);
 
         mBarService = IStatusBarService.Stub.asInterface(
                 ServiceManager.getService(Context.STATUS_BAR_SERVICE));
@@ -1000,6 +1007,7 @@ public class StatusBar extends SystemUI implements DemoMode,
             }
         };
         Dependency.get(ConfigurationController.class).addCallback(mConfigurationListener);
+        mFlashlightController = Dependency.get(FlashlightController.class);
     }
 
     protected void createIconController() {
@@ -1078,14 +1086,13 @@ public class StatusBar extends SystemUI implements DemoMode,
             mNotificationPanelDebugText.setVisibility(View.VISIBLE);
         }
 
-        try {
-            boolean showNav = mWindowManagerService.hasNavigationBar();
-            if (DEBUG) Log.v(TAG, "hasNavigationBar=" + showNav);
-            if (showNav) {
-                createNavigationBar();
-            }
-        } catch (RemoteException ex) {
-            // no window manager? good luck with that
+        boolean showNav = Settings.Secure.getInt(mContext.getContentResolver(),
+                Settings.Secure.NAVIGATION_BAR_VISIBLE,
+                DUActionUtils.hasNavbarByDefault(mContext) ? 1 : 0) != 0;
+        if (DEBUG)
+            Log.v(TAG, "hasNavigationBar=" + showNav);
+        if (showNav) {
+            createNavigationBar();
         }
 
         // figure out which pixel-format to use for the status bar.
@@ -1275,6 +1282,18 @@ public class StatusBar extends SystemUI implements DemoMode,
             }
             mNavigationBar.setCurrentSysuiVisibility(mSystemUiVisibility);
         });
+    }
+
+    protected void removeNavigationBar() {
+        if (mNavigationBar != null && mNavigationBarView != null) {
+            FragmentHostManager fragmentHost = FragmentHostManager.get(mNavigationBarView);
+            fragmentHost.getFragmentManager().beginTransaction().remove(mNavigationBar);
+            if (mNavigationBarView.isAttachedToWindow()) {
+                mWindowManager.removeViewImmediate(mNavigationBarView);
+            }
+            mNavigationBar = null;
+            mNavigationBarView = null;
+        }
     }
 
     /**
@@ -3247,6 +3266,15 @@ public class StatusBar extends SystemUI implements DemoMode,
                 mask, fullscreenStackBounds, dockedStackBounds, sbModeChanged, mStatusBarMode);
     }
 
+    @Override
+    public void toggleFlashlight() {
+        if (mFlashlightController != null
+                && mFlashlightController.hasFlashlight()
+                && mFlashlightController.isAvailable()) {
+            mFlashlightController.setFlashlight(!mFlashlightController.isEnabled());
+        }
+    }
+
     void touchAutoHide() {
         // update transient bar autohide
         if (mStatusBarMode == MODE_SEMI_TRANSPARENT || (mNavigationBar != null
@@ -4834,8 +4862,9 @@ public class StatusBar extends SystemUI implements DemoMode,
     }
 
     // TODO: Figure out way to remove this.
-    public NavigationBarView getNavigationBarView() {
-        return mNavigationBar != null ? (NavigationBarView) mNavigationBar.getView() : null;
+    // We can't remove you yet but we can make you more abstract ;D
+    public Navigator getNavigationBarView() {
+        return mNavigationBar != null ? mNavigationBar.getNavigator() : null;
     }
 
     // ---------------------- DragDownHelper.OnDragDownListener ------------------------------------
@@ -5606,6 +5635,25 @@ public class StatusBar extends SystemUI implements DemoMode,
                 Settings.System.STATUS_BAR_SHOW_TICKER, 1,
                 UserHandle.USER_CURRENT);
     }
+
+    protected final ContentObserver mNavbarObserver = new ContentObserver(mHandler) {
+        @Override
+        public void onChange(boolean selfChange) {
+            boolean showing = Settings.Secure.getInt(mContext.getContentResolver(),
+                    Settings.Secure.NAVIGATION_BAR_VISIBLE,
+                    DUActionUtils.hasNavbarByDefault(mContext) ? 1 : 0) != 0;
+            if (!showing && mNavigationBar != null && mNavigationBarView != null) {
+                removeNavigationBar();
+            } else if (showing && mNavigationBar == null && mNavigationBarView == null) {
+                createNavigationBar();
+            }
+            if (!DUActionUtils.hasNavbarByDefault(mContext)) {
+                Intent intent = new Intent("com.cyanogenmod.action.UserChanged");
+                intent.setPackage("com.android.settings");
+                mContext.sendBroadcastAsUser(intent, new UserHandle(UserHandle.USER_CURRENT));
+            }
+        }
+    };
 
     private RemoteViews.OnClickHandler mOnClickHandler = new RemoteViews.OnClickHandler() {
 
